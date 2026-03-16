@@ -1,0 +1,21 @@
+# Binaries
+bin/
+*.exe
+
+# Environment
+.env
+
+# Go test cache / coverage
+*.test
+*.out
+coverage.html
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
