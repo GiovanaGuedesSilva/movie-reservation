@@ -1,6 +1,80 @@
 # Guia de Desenvolvimento — Movie Reservation System
 
-Este documento detalha as etapas de desenvolvimento do projeto para que **Dev 1** e **Dev 2** possam trabalhar em paralelo com clareza sobre responsabilidades, dependências e critérios de conclusão.
+Este documento orienta o próximo dev a iniciar a **Etapa 1** a partir da base já entregue no **Setup 0**.
+
+---
+
+## Status Atual
+
+> Última atualização: Etapa 0 concluída — **Etapa 1 é a próxima para ambas**
+
+| Etapa | Status | Responsável |
+|---|---|---|
+| **0 — Setup** | ✅ Concluída | Ambas |
+| **1 — Domain + Ports** | ⬜ Pendente — próxima | Dev 1 + Dev 2 em paralelo |
+| **2 — Services + Repos** | ⬜ Pendente | Dev 1 + Dev 2 em paralelo |
+| **3 — HTTP Handlers** | ⬜ Pendente | Dev 1 + Dev 2 em paralelo |
+| **4 — Reservas + Testes** | ⬜ Pendente | Dev 1 + Dev 2 em paralelo |
+| **5 — Relatórios + Docs** | ⬜ Pendente | Dev 1 + Dev 2 em paralelo |
+| **6 — Integração Final** | ⬜ Pendente | Ambas |
+
+---
+
+## O que já existe no repositório (Etapa 0)
+
+Antes de começar a Etapa 1, toda a infraestrutura base já está criada:
+
+```
+go.mod                                      ← módulo + 9 dependências declaradas
+.env.example                                ← variáveis de ambiente documentadas
+.gitignore
+Dockerfile                                  ← multi-stage build
+docker-compose.yml                          ← PostgreSQL 15 + API + healthcheck
+Makefile                                    ← 15 comandos prontos
+cmd/api/main.go                             ← servidor HTTP + graceful shutdown
+internal/adapters/primary/http/router.go    ← Chi + middlewares globais + GET /health
+pkg/config/config.go                        ← leitura de .env
+pkg/logger/logger.go                        ← slog estruturado
+pkg/apperrors/errors.go                     ← erros de domínio tipados
+pkg/auth/jwt.go                             ← GenerateToken + ValidateToken
+migrations/000001_create_users.*
+migrations/000002_create_movies.*           ← inclui genres e movie_genres
+migrations/000003_create_theaters.*         ← inclui seats
+migrations/000004_create_showtimes.*
+migrations/000005_create_reservations.*     ← inclui UNIQUE(seat_id, showtime_id)
+scripts/seed.go                             ← admin + gêneros + filmes + salas
+```
+
+### Antes de começar a Etapa 1
+
+```bash
+# 1. Instalar Go 1.22+  →  https://go.dev/dl/
+
+# 2. Clonar o repositório
+git clone https://github.com/<usuario>/movie-reservation.git
+cd movie-reservation
+
+# 3. Copiar o .env e definir o JWT_SECRET
+cp .env.example .env
+# Editar .env: trocar JWT_SECRET por um valor forte
+# Exemplo: openssl rand -base64 32
+
+# 4. Baixar dependências e gerar go.sum
+make tidy
+
+# 5. Confirmar que o projeto compila
+go build ./...
+
+# 6. Subir o banco, rodar migrations e seed
+make docker-db
+make migrate-up
+make seed
+
+# 7. Rodar a API e testar o health check
+make run
+curl http://localhost:8080/health
+# Esperado: {"env":"development","status":"ok"}
+```
 
 ---
 
@@ -11,97 +85,75 @@ Este documento detalha as etapas de desenvolvimento do projeto para que **Dev 1*
 | **Domínio principal** | Auth · Usuários · Filmes · Gêneros | Salas · Assentos · Sessões · Reservas · Relatórios |
 | **Camadas** | domain → ports → service → adapter | domain → ports → service → adapter |
 
-> **Regra de ouro:** nenhuma etapa de negócio começa sem a **Etapa 0** estar concluída por ambas.
+> **Regra de ouro:** o `core` nunca importa nada dos `adapters`. Dependência sempre de fora para dentro.
 
 ---
 
-## Visão Geral das Etapas
+## Etapa 0 — Setup do Projeto ✅
 
-```
-Etapa 0 ──────────── Setup do projeto (AMBAS, ~1 dia)
-    │
-    ├── Etapa 1 Dev1: Domain User/Movie/Genre + Ports
-    ├── Etapa 1 Dev2: Domain Theater/Seat/Showtime/Reservation + Ports
-    │
-    ├── Etapa 2 Dev1: Services Auth/User/Movie + Repos GORM
-    ├── Etapa 2 Dev2: Services Theater/Showtime + Repos GORM
-    │
-    ├── Etapa 3 Dev1: HTTP Handlers Auth/User/Movie + Middleware
-    ├── Etapa 3 Dev2: HTTP Handlers Theater/Showtime + Router
-    │
-    ├── Etapa 4 Dev1: Testes de Auth e Movie
-    ├── Etapa 4 Dev2: Service/Handler de Reservation (concorrência)
-    │
-    ├── Etapa 5 Dev1: Relatórios de receita + seed de produção
-    ├── Etapa 5 Dev2: Relatórios de capacidade + Postman Collection
-    │
-    └── Etapa 6 ──── Integração final, revisão, Docker prod (AMBAS)
-```
+> **Responsáveis:** Ambas
+> **Status: CONCLUÍDA**
 
----
+### O que foi feito
 
-## Etapa 0 — Setup do Projeto
+**Infraestrutura:**
+- `go.mod` com módulo `github.com/movie-reservation/api` e 9 dependências
+- `Dockerfile` multi-stage: builder `golang:1.22-alpine` → runtime `alpine:3.19`
+- `docker-compose.yml`: PostgreSQL 15 com healthcheck; serviço `api` com `depends_on: postgres`
+- `.env.example` com todas as variáveis necessárias
+- `.gitignore` cobrindo binários, `.env`, cobertura e editores
+- `Makefile` com 15 comandos prontos para uso
 
-> **Responsáveis:** Ambas  
-> **Estimativa:** 1 dia  
-> **Branch:** `develop` (trabalho direto)
+**Pacotes base (`pkg/`):**
+- `pkg/config/config.go` — lê `.env` e variáveis de ambiente; `DSN()` monta a string de conexão; `requireEnv` faz panic se variável obrigatória estiver ausente
+- `pkg/logger/logger.go` — `slog`: JSON em `production`, texto em `development`
+- `pkg/apperrors/errors.go` — erros tipados com `StatusCode`, `Code` e `Unwrap`; inclui `ErrSeatAlreadyTaken`, `ErrCannotCancelPastReservation` e outros
+- `pkg/auth/jwt.go` — `GenerateToken` e `ValidateToken` com `golang-jwt/jwt v5`
 
-Esta etapa deve ser feita em conjunto ou com uma fazendo e a outra revisando via PR.
+**Servidor HTTP:**
+- `internal/adapters/primary/http/router.go` — Chi com middlewares globais (`RequestID`, `RealIP`, `Logger`, `Recoverer`, `Timeout`) e `GET /health`
+- `cmd/api/main.go` — wire-up `config → logger → router → http.Server`; graceful shutdown em `SIGINT`/`SIGTERM` com 30s de timeout
 
-### Checklist
+**Banco de dados (migrations):**
 
-- [ ] Criar repositório no GitHub com branch `main` e `develop`
-- [ ] Definir regras de branch protection em `main` (exige PR + aprovação)
-- [ ] Inicializar módulo Go
+| Arquivo | Tabelas criadas |
+|---|---|
+| `000001_create_users` | `users` + enum `user_role` + extensão `uuid-ossp` |
+| `000002_create_movies` | `movies`, `genres`, `movie_genres` (N:N) |
+| `000003_create_theaters` | `theaters`, `seats` — `UNIQUE(theater_id, row, number)` |
+| `000004_create_showtimes` | `showtimes` — constraint `end_time > start_time` |
+| `000005_create_reservations` | `reservations`, `reservation_seats` — `UNIQUE(seat_id, showtime_id)` |
 
-```bash
-mkdir movie-reservation && cd movie-reservation
-go mod init github.com/seu-usuario/movie-reservation
-```
+**Seed (`scripts/seed.go`):**
+- 1 usuário admin (credenciais do `.env`)
+- 5 gêneros
+- 3 filmes com gêneros associados
+- 3 salas com assentos gerados automaticamente (A1…J15 por exemplo)
 
-- [ ] Criar estrutura completa de pastas (veja README.md)
-- [ ] Configurar `docker-compose.yml` com PostgreSQL 15
-- [ ] Criar `Dockerfile` multi-stage para a aplicação Go
-- [ ] Criar `.env.example` com todas as variáveis necessárias
-- [ ] Criar `Makefile` com todos os comandos do projeto
-- [ ] Instalar dependências base
+### Notas técnicas
 
-```bash
-go get github.com/go-chi/chi/v5
-go get gorm.io/gorm
-go get gorm.io/driver/postgres
-go get github.com/golang-jwt/jwt/v5
-go get github.com/joho/godotenv
-go get github.com/google/uuid
-go get golang.org/x/crypto/bcrypt
-go get github.com/golang-migrate/migrate/v4
-go get github.com/stretchr/testify
-```
-
-- [ ] Criar `pkg/config/config.go` — leitura de `.env`
-- [ ] Criar `pkg/logger/logger.go` — logger estruturado básico
-- [ ] Criar `pkg/apperrors/errors.go` — erros de domínio tipados
-- [ ] Criar `cmd/api/main.go` com servidor HTTP mínimo rodando
-
-### Critério de conclusão
-
-`make docker-up` sobe o banco e a API responde `200` em `GET /health`.
+- O pacote `internal/adapters/primary/http/` é declarado como `package server` para evitar conflito com `net/http`
+- `scripts/seed.go` usa `//go:build ignore` — nunca entra no binário; execute com `go run ./scripts/seed.go`
+- O `go.sum` ainda não existe — será gerado automaticamente com `make tidy` após instalar o Go
 
 ---
 
 ## Etapa 1 — Entidades de Domínio e Ports
 
-> **Estimativa:** 1–2 dias  
-> **Pré-requisito:** Etapa 0 concluída
+> **Estimativa:** 1–2 dias
+> **Pré-requisito:** Etapa 0 + `make tidy` executado com sucesso
 
 ### Dev 1 — Branch: `feature/domain-auth-movies`
 
-**Criar as entidades de domínio:**
+**Entidades de domínio:**
 
 - [ ] `internal/core/domain/user.go`
   ```go
   type Role string
-  const (RoleAdmin Role = "admin"; RoleUser Role = "user")
+  const (
+      RoleAdmin Role = "admin"
+      RoleUser  Role = "user"
+  )
 
   type User struct {
       ID           uuid.UUID
@@ -136,13 +188,13 @@ go get github.com/stretchr/testify
   }
   ```
 
-**Criar as interfaces (ports):**
+**Ports de entrada (use cases):**
 
 - [ ] `internal/core/ports/inbound/auth_service.go`
   ```go
   type AuthService interface {
       SignUp(ctx context.Context, input SignUpInput) (*domain.User, error)
-      Login(ctx context.Context, input LoginInput) (string, error) // retorna JWT
+      Login(ctx context.Context, input LoginInput) (string, error)
   }
   ```
 
@@ -166,10 +218,33 @@ go get github.com/stretchr/testify
   }
   ```
 
+**Ports de saída (repositórios):**
+
 - [ ] `internal/core/ports/outbound/user_repository.go`
+  ```go
+  type UserRepository interface {
+      Create(ctx context.Context, user *domain.User) error
+      GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
+      GetByEmail(ctx context.Context, email string) (*domain.User, error)
+      List(ctx context.Context) ([]domain.User, error)
+      Update(ctx context.Context, user *domain.User) error
+  }
+  ```
+
 - [ ] `internal/core/ports/outbound/movie_repository.go`
+  ```go
+  type MovieRepository interface {
+      Create(ctx context.Context, movie *domain.Movie) error
+      GetByID(ctx context.Context, id uuid.UUID) (*domain.Movie, error)
+      List(ctx context.Context, filters MovieFilters) ([]domain.Movie, error)
+      Update(ctx context.Context, movie *domain.Movie) error
+      Delete(ctx context.Context, id uuid.UUID) error
+  }
+  ```
 
 ### Dev 2 — Branch: `feature/domain-showtime-reservation`
+
+**Entidades de domínio:**
 
 - [ ] `internal/core/domain/theater.go`
   ```go
@@ -207,7 +282,10 @@ go get github.com/stretchr/testify
 - [ ] `internal/core/domain/reservation.go`
   ```go
   type ReservationStatus string
-  const (StatusActive ReservationStatus = "active"; StatusCancelled = "cancelled")
+  const (
+      StatusActive    ReservationStatus = "active"
+      StatusCancelled ReservationStatus = "cancelled"
+  )
 
   type Reservation struct {
       ID         uuid.UUID
@@ -217,296 +295,77 @@ go get github.com/stretchr/testify
       TotalPrice float64
       Status     ReservationStatus
       CreatedAt  time.Time
+      UpdatedAt  time.Time
   }
   ```
 
+**Ports de entrada (use cases):**
+
 - [ ] `internal/core/ports/inbound/showtime_service.go`
+  ```go
+  type ShowtimeService interface {
+      Create(ctx context.Context, input CreateShowtimeInput) (*domain.Showtime, error)
+      GetByID(ctx context.Context, id uuid.UUID) (*domain.Showtime, error)
+      List(ctx context.Context, filters ShowtimeFilters) ([]domain.Showtime, error)
+      GetAvailableSeats(ctx context.Context, showtimeID uuid.UUID) ([]domain.Seat, error)
+      Update(ctx context.Context, id uuid.UUID, input UpdateShowtimeInput) (*domain.Showtime, error)
+      Delete(ctx context.Context, id uuid.UUID) error
+  }
+  ```
+
 - [ ] `internal/core/ports/inbound/reservation_service.go`
+  ```go
+  type ReservationService interface {
+      Create(ctx context.Context, input CreateReservationInput) (*domain.Reservation, error)
+      Cancel(ctx context.Context, userID, reservationID uuid.UUID) error
+      ListByUser(ctx context.Context, userID uuid.UUID) ([]domain.Reservation, error)
+      ListAll(ctx context.Context) ([]domain.Reservation, error)
+  }
+  ```
+
+**Ports de saída (repositórios):**
+
 - [ ] `internal/core/ports/outbound/theater_repository.go`
+  ```go
+  type TheaterRepository interface {
+      Create(ctx context.Context, theater *domain.Theater) error
+      GetByID(ctx context.Context, id uuid.UUID) (*domain.Theater, error)
+      List(ctx context.Context) ([]domain.Theater, error)
+      GetSeats(ctx context.Context, theaterID uuid.UUID) ([]domain.Seat, error)
+  }
+  ```
+
 - [ ] `internal/core/ports/outbound/showtime_repository.go`
+  ```go
+  type ShowtimeRepository interface {
+      Create(ctx context.Context, showtime *domain.Showtime) error
+      GetByID(ctx context.Context, id uuid.UUID) (*domain.Showtime, error)
+      List(ctx context.Context, filters ShowtimeFilters) ([]domain.Showtime, error)
+      GetAvailableSeats(ctx context.Context, showtimeID uuid.UUID) ([]domain.Seat, error)
+      Update(ctx context.Context, showtime *domain.Showtime) error
+      Delete(ctx context.Context, id uuid.UUID) error
+  }
+  ```
+
 - [ ] `internal/core/ports/outbound/reservation_repository.go`
-
-### Critério de conclusão
-
-Todas as interfaces compilam sem erros. `go build ./...` passa.
-
----
-
-## Etapa 2 — Services e Repositórios GORM
-
-> **Estimativa:** 2–3 dias  
-> **Pré-requisito:** Etapa 1 (pode começar com as interfaces já definidas, antes de merges)
-
-### Dev 1 — Branch: `feature/service-auth-movies`
-
-**Migrations:**
-
-- [ ] `migrations/000001_create_users.up.sql`
-- [ ] `migrations/000002_create_movies.up.sql`
-- [ ] `migrations/000003_create_genres.up.sql`
-- [ ] `migrations/000004_create_movie_genres.up.sql`
-
-**Repositórios GORM:**
-
-- [ ] `internal/adapters/secondary/postgres/models.go` — modelos GORM (UserModel, MovieModel...)
-- [ ] `internal/adapters/secondary/postgres/db.go` — conexão GORM + AutoMigrate
-- [ ] `internal/adapters/secondary/postgres/user_repository.go`
-  - `Create`, `GetByID`, `GetByEmail`, `List`, `Update`
-- [ ] `internal/adapters/secondary/postgres/movie_repository.go`
-  - `Create`, `GetByID`, `List` (com filtro por gênero), `Update`, `Delete`
-
-**Services:**
-
-- [ ] `pkg/auth/jwt.go` — `GenerateToken(user)`, `ValidateToken(token)`
-- [ ] `internal/core/services/auth_service.go`
-  - `SignUp`: valida email único, faz hash da senha com bcrypt, salva usuário
-  - `Login`: busca por email, compara hash, gera JWT
-- [ ] `internal/core/services/user_service.go`
-  - `GetByID`, `ListAll`, `PromoteToAdmin`
-- [ ] `internal/core/services/movie_service.go`
-  - CRUD completo, associa gêneros
-
-### Dev 2 — Branch: `feature/service-showtime-theater`
-
-**Migrations:**
-
-- [ ] `migrations/000005_create_theaters.up.sql`
-- [ ] `migrations/000006_create_seats.up.sql`
-- [ ] `migrations/000007_create_showtimes.up.sql`
-- [ ] `migrations/000008_create_reservations.up.sql`
-- [ ] `migrations/000009_create_reservation_seats.up.sql`
-  - Incluir: `UNIQUE(seat_id, showtime_id)` — chave para prevenção de overbooking
-
-**Repositórios GORM:**
-
-- [ ] `internal/adapters/secondary/postgres/theater_repository.go`
-  - `Create` (cria sala E gera todos os assentos automaticamente), `GetByID`, `List`
-- [ ] `internal/adapters/secondary/postgres/showtime_repository.go`
-  - `Create`, `GetByID`, `ListByDate`, `ListByMovie`, `Update`, `Delete`
-  - `GetAvailableSeats(showtimeID)` — retorna assentos não reservados
-- [ ] `internal/adapters/secondary/postgres/reservation_repository.go`
-  - `Create` (dentro de transação), `GetByID`, `ListByUser`, `ListAll`, `Cancel`
-  - `IsSeatsAvailable(showtimeID, seatIDs)` — verifica disponibilidade com `SELECT FOR UPDATE`
-
-**Services:**
-
-- [ ] `internal/core/services/theater_service.go`
-- [ ] `internal/core/services/showtime_service.go`
-  - Valida conflito de horário na mesma sala
-  - Calcula `end_time` baseado em `start_time + movie.duration_minutes`
-
-### Critério de conclusão
-
-`make migrate-up && make seed` executa sem erros. Testes unitários dos services passam com mocks.
-
----
-
-## Etapa 3 — HTTP Handlers e Roteamento
-
-> **Estimativa:** 2 dias  
-> **Pré-requisito:** Etapa 2
-
-### Dev 1 — Branch: `feature/handlers-auth-movies`
-
-- [ ] `internal/adapters/primary/http/middleware/auth.go`
-  - Extrai `Authorization: Bearer <token>`, valida JWT, injeta user no contexto
-- [ ] `internal/adapters/primary/http/middleware/role.go`
-  - Middleware `RequireAdmin` — retorna 403 se role != "admin"
-- [ ] `internal/adapters/primary/http/handlers/auth_handler.go`
-  - `POST /auth/signup`
-  - `POST /auth/login`
-- [ ] `internal/adapters/primary/http/handlers/user_handler.go`
-  - `GET /users/me`
-  - `GET /users` (admin)
-  - `PUT /users/:id/promote` (admin)
-- [ ] `internal/adapters/primary/http/handlers/movie_handler.go`
-  - `GET /movies`, `GET /movies/:id`
-  - `POST /movies`, `PUT /movies/:id`, `DELETE /movies/:id` (admin)
-  - `GET /genres`, `POST /genres` (admin)
-
-### Dev 2 — Branch: `feature/handlers-showtime-theater`
-
-- [ ] `internal/adapters/primary/http/router.go`
-  - Registra todas as rotas com Chi
-  - Aplica middlewares globais (Logger, Recoverer, CORS)
-- [ ] `internal/adapters/primary/http/handlers/showtime_handler.go`
-  - `GET /showtimes?date=&movie_id=`
-  - `GET /showtimes/:id`
-  - `GET /showtimes/:id/seats`
-  - `POST /showtimes`, `PUT /showtimes/:id`, `DELETE /showtimes/:id` (admin)
-- [ ] `internal/adapters/primary/http/handlers/theater_handler.go`
-  - `GET /theaters` (admin)
-  - `POST /theaters` (admin)
-  - `GET /theaters/:id/seats`
-
-**Injeção de dependências:**
-
-- [ ] Atualizar `cmd/api/main.go` com wire-up completo:
-  ```
-  main → config → db → repositories → services → handlers → router → server
+  ```go
+  type ReservationRepository interface {
+      Create(ctx context.Context, reservation *domain.Reservation) error
+      GetByID(ctx context.Context, id uuid.UUID) (*domain.Reservation, error)
+      ListByUser(ctx context.Context, userID uuid.UUID) ([]domain.Reservation, error)
+      ListAll(ctx context.Context) ([]domain.Reservation, error)
+      Cancel(ctx context.Context, id uuid.UUID) error
+      IsSeatsAvailable(ctx context.Context, showtimeID uuid.UUID, seatIDs []uuid.UUID) (bool, error)
+  }
   ```
 
 ### Critério de conclusão
 
-Após merge das branches de ambas, `make run` sobe a API completa. Todos os endpoints respondem (testado via curl ou Postman).
-
----
-
-## Etapa 4 — Reservas e Testes
-
-> **Estimativa:** 2–3 dias  
-> **Pré-requisito:** Etapa 3
-
-### Dev 1 — Branch: `feature/tests-auth-movies`
-
-Escrever testes unitários com mocks das interfaces de repositório:
-
-- [ ] `internal/core/services/auth_service_test.go`
-  - SignUp com email duplicado retorna erro
-  - Login com senha errada retorna erro
-  - Login correto retorna token JWT válido
-- [ ] `internal/core/services/movie_service_test.go`
-  - Criar filme sem gêneros válidos retorna erro
-  - Deletar filme com sessões futuras retorna erro
-- [ ] `internal/core/services/user_service_test.go`
-  - Promover usuário que não existe retorna ErrNotFound
-
-### Dev 2 — Branch: `feature/reservation-service`
-
-Esta é a parte mais crítica do projeto — **prevenção de overbooking**.
-
-- [ ] `internal/core/services/reservation_service.go`
-  ```
-  CreateReservation(ctx, userID, showtimeID, seatIDs):
-    1. Iniciar transação no banco
-    2. SELECT FOR UPDATE nos assentos solicitados
-    3. Verificar se já existem em reservation_seats para o showtime
-    4. Se livre: criar reservation + reservation_seats
-    5. Calcular total_price = len(seats) * showtime.price
-    6. Commit da transação
-    7. Se erro de constraint UNIQUE: retornar ErrSeatAlreadyTaken
-  ```
-
-- [ ] `internal/core/services/reservation_service.go` — `CancelReservation`
-  ```
-  CancelReservation(ctx, userID, reservationID):
-    1. Buscar reservation
-    2. Verificar se pertence ao userID (ou se é admin)
-    3. Verificar se showtime.start_time > time.Now()
-    4. Atualizar status para "cancelled"
-    5. Remover registros de reservation_seats
-  ```
-
-- [ ] `internal/adapters/primary/http/handlers/reservation_handler.go`
-  - `GET /reservations/me`
-  - `POST /reservations`
-  - `DELETE /reservations/:id`
-  - `GET /admin/reservations` (admin)
-
-- [ ] `internal/core/services/reservation_service_test.go`
-  - Reserva de assento já ocupado retorna ErrSeatAlreadyTaken
-  - Cancelamento de reserva passada retorna ErrCannotCancelPastReservation
-  - Cancelamento por usuário diferente retorna ErrForbidden
-
-### Critério de conclusão
-
-Teste de concorrência: 10 goroutines tentando reservar o mesmo assento simultaneamente — apenas 1 deve ter sucesso.
-
----
-
-## Etapa 5 — Relatórios, Seed e Documentação
-
-> **Estimativa:** 1–2 dias  
-> **Pré-requisito:** Etapa 4
-
-### Dev 1 — Branch: `feature/reports-revenue`
-
-- [ ] Query de receita em `reservation_repository.go`
-  ```sql
-  SELECT m.title, s.start_time, COUNT(rs.seat_id) as tickets_sold,
-         SUM(s.price) as revenue
-  FROM showtimes s
-  JOIN movies m ON m.id = s.movie_id
-  JOIN reservations r ON r.showtime_id = s.id AND r.status = 'active'
-  JOIN reservation_seats rs ON rs.reservation_id = r.id
-  GROUP BY m.title, s.id
-  ORDER BY s.start_time DESC
-  ```
-
-- [ ] `GET /admin/reports/revenue` com filtros opcionais: `?from=&to=&movie_id=`
-- [ ] `scripts/seed.go` — dados para demonstração:
-  - 1 admin (credenciais do `.env`)
-  - 5 gêneros
-  - 10 filmes com gêneros
-  - 3 salas com assentos
-  - Sessões para a próxima semana
-
-### Dev 2 — Branch: `feature/reports-capacity`
-
-- [ ] Query de capacidade em `showtime_repository.go`
-  ```sql
-  SELECT s.id, m.title, s.start_time,
-         t.total_rows * t.seats_per_row as total_seats,
-         COUNT(rs.seat_id) as reserved_seats,
-         ROUND(COUNT(rs.seat_id)::numeric /
-               (t.total_rows * t.seats_per_row) * 100, 2) as occupancy_pct
-  FROM showtimes s
-  JOIN movies m ON m.id = s.movie_id
-  JOIN theaters t ON t.id = s.theater_id
-  LEFT JOIN reservations r ON r.showtime_id = s.id AND r.status = 'active'
-  LEFT JOIN reservation_seats rs ON rs.reservation_id = r.id
-  GROUP BY s.id, m.title, s.start_time, t.total_rows, t.seats_per_row
-  ```
-
-- [ ] `GET /admin/reports/capacity`
-- [ ] **Postman Collection** (`docs/movie-reservation.postman_collection.json`)
-  - Todos os endpoints com exemplos de request/response
-  - Variáveis de ambiente: `{{base_url}}`, `{{token}}`, `{{admin_token}}`
-
-### Critério de conclusão
-
-`make seed` popula o banco. Todos os endpoints de relatório retornam dados corretos.
-
----
-
-## Etapa 6 — Integração Final e Deploy
-
-> **Responsáveis:** Ambas  
-> **Estimativa:** 1–2 dias  
-> **Branch:** `feature/final-integration` → PR para `main`
-
-### Checklist conjunto
-
-- [ ] Revisão cruzada: Dev 1 revisa código da Dev 2 e vice-versa
-- [ ] Testes de integração com banco real (Docker)
-  - Fluxo completo: signup → login → browse movies → reserve → cancel
-  - Fluxo admin: login admin → create movie → create showtime → view reports
-- [ ] `Dockerfile` multi-stage otimizado
-  ```dockerfile
-  FROM golang:1.22-alpine AS builder
-  WORKDIR /app
-  COPY go.mod go.sum ./
-  RUN go mod download
-  COPY . .
-  RUN go build -o bin/api ./cmd/api
-
-  FROM alpine:3.19
-  WORKDIR /app
-  COPY --from=builder /app/bin/api .
-  COPY --from=builder /app/migrations ./migrations
-  EXPOSE 8080
-  CMD ["./api"]
-  ```
-- [ ] `docker-compose.yml` com healthcheck no postgres e depends_on na api
-- [ ] Variáveis de produção documentadas no `.env.example`
-- [ ] Atualizar README com instruções finais
-- [ ] Tag `v1.0.0` no git
+`go build ./...` passa sem erros. Nenhum arquivo de domínio importa pacotes de infraestrutura.
 
 ---
 
 ## Fluxo de Trabalho com Git
-
-### Criando uma feature
 
 ```bash
 # Sempre a partir de develop atualizado
@@ -533,43 +392,3 @@ git rebase origin/develop
 # 2. git add arquivo-resolvido
 # 3. git rebase --continue
 ```
-
-### Merge para main (somente releases)
-
-```bash
-# PR: develop → main (requer aprovação das duas)
-# Após merge, criar tag:
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin v1.0.0
-```
-
----
-
-## Dependências entre Etapas
-
-```
-Etapa 0 (ambas)
-    └─► Etapa 1 Dev1 ──► Etapa 2 Dev1 ──► Etapa 3 Dev1 ──► Etapa 4 Dev1 ──► Etapa 5 Dev1
-    └─► Etapa 1 Dev2 ──► Etapa 2 Dev2 ──► Etapa 3 Dev2 ──► Etapa 4 Dev2 ──► Etapa 5 Dev2
-                                                                                    └─► Etapa 6 (ambas)
-```
-
-**Pontos de sincronização obrigatória:**
-1. Após Etapa 0 — revisar estrutura juntas antes de começar paralelo
-2. Após Etapa 3 — merge das duas branches antes da Etapa 4 (reservation_handler precisa dos middlewares de Dev 1)
-3. Antes da Etapa 6 — todas as features em `develop`, build passando
-
----
-
-## Estimativa Total
-
-| Etapa | Dias |
-|---|---|
-| 0 — Setup | 1 |
-| 1 — Domain + Ports | 1–2 |
-| 2 — Services + Repos | 2–3 |
-| 3 — HTTP Handlers | 2 |
-| 4 — Reservas + Testes | 2–3 |
-| 5 — Relatórios + Docs | 1–2 |
-| 6 — Integração Final | 1–2 |
-| **Total** | **~10–15 dias úteis** |
